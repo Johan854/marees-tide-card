@@ -1,15 +1,47 @@
+{ // bloc isolé : aucune variable ne fuit vers les autres cartes
 /*
  * Marées France — Tide Card (FR)
  * Carte Home Assistant pour l'intégration « Marées France » (SHOM) : prochaine marée, courbe de la hauteur d'eau
  * avec curseur, marées du jour, température de l'eau, zone de faible profondeur et calendrier des coefficients.
  * Style verre, thème clair/sombre automatique, éditeur visuel, textes en français.
  */
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0";
+
+/* === NUANCE COMMUNE v2 (cartes Johan854) ===
+ * Bloc identique dans toutes les cartes. Options : nuance, nuance_perso, intensite.
+ * nuance "theme" (par défaut) : suit la variable carte-nuance du thème Home Assistant ;
+ * si elle n'existe pas, la carte garde ses couleurs d'origine. Intensité : 0 = neutre, 1 = normal, 2 = très coloré. */
+const GV_NUANCES = [["braise", "Braise (rouge)", "#e0524f"], ["ocean", "Océan (bleu)", "#2f8fd8"], ["lagon", "Lagon (turquoise)", "#1fb5a8"], ["foret", "Forêt (vert)", "#3fae5a"], ["lavande", "Lavande (violet)", "#8a63d8"], ["framboise", "Framboise (rose)", "#e05597"], ["ambre", "Ambre (orange)", "#e8902c"], ["ardoise", "Ardoise (neutre)", "#7d8595"]];
+const GV_DEFAULTS = { nuance: "theme", intensite: 1 };
+const gvAccent = (c) => {
+  const p = c && c.nuance_perso;
+  if (c && c.nuance === "perso") {
+    if (Array.isArray(p) && p.length === 3) return "#" + p.map((v) => Math.max(0, Math.min(255, Math.round(+v || 0))).toString(16).padStart(2, "0")).join("");
+    if (typeof p === "string" && /^#?[0-9a-f]{6}$/i.test(p.trim())) return "#" + p.trim().replace("#", "");
+  }
+  const n = GV_NUANCES.find((x) => x[0] === (c && c.nuance));
+  return n ? n[2] : "var(--carte-nuance)";
+};
+/* Variables posées sur <ha-card> : --g-bg-x (fond dégradé teinté) et --acc-ui-x (couleur d'accent).
+ * Sans nuance (thème sans carte-nuance), elles sont invalides : chaque carte retombe alors sur ses couleurs d'origine. */
+const gvStyle = (c, dark) => {
+  const i = Number(c && c.intensite), ai = Number.isFinite(i) ? Math.max(0, Math.min(2, i)) : 1;
+  const m = (pct, base) => `color-mix(in srgb,var(--acc-ui) ${+(pct * ai).toFixed(1)}%,${base})`;
+  const bg = dark ? `linear-gradient(160deg,${m(5, "#1b1e32")} 0%,${m(11, "#1f1b2c")} 55%,${m(22, "#1c1620")} 100%)`
+    : `linear-gradient(160deg,${m(2, "#f8f9fd")} 0%,${m(5, "#eef1f8")} 55%,${m(11, "#f8f8fa")} 100%)`;
+  return `--acc-ui:${gvAccent(c)};--g-bg-x:${bg};--acc-ui-x:color-mix(in srgb,var(--acc-ui) ${dark ? "80%,#fff" : "82%,#000"})`;
+};
+const GV_FIELDS = [
+  { name: "nuance", selector: { select: { mode: "dropdown", options: [{ value: "theme", label: "Selon le thème (couleurs d'origine)" }, ...GV_NUANCES.map((n) => ({ value: n[0], label: n[1] })), { value: "perso", label: "Personnalisée" }] } } },
+  { name: "nuance_perso", selector: { color_rgb: {} } },
+  { name: "intensite", selector: { number: { min: 0, max: 2, step: 0.1, mode: "slider" } } }];
+const GV_LABELS = { nuance: "Nuance de couleur", nuance_perso: "Couleur personnalisée (nuance « Personnalisée »)", intensite: "Intensité de la nuance" };
+/* === FIN NUANCE COMMUNE === */
 
 const DEFAULTS = {
   device_id: "",
   title: "",
-  theme: "auto", // auto | light | dark
+  theme: "auto", nuance: "theme", intensite: 1, // auto | light | dark
   card_type: "full", // full | condensed
   days: 7,
   show_temperature: true,
@@ -244,7 +276,7 @@ class MareesTideCard extends HTMLElement {
       <button class="tab ${this._tab === "coefs" ? "on" : ""}" data-tab="coefs"><ha-icon icon="mdi:calendar-month"></ha-icon>Coefficients</button></div>` : "";
 
     this.shadowRoot.innerHTML = `<style>${this._css()}</style>
-    <ha-card class="${dark ? "dark" : "light"}">
+    <ha-card class="${dark ? "dark" : "light"}" style="${gvStyle(this._config, dark)}">
       <div class="hd"><span class="t">${esc(title)}</span>${c.card_type === "condensed" ? `<button class="ic ${this._graphOpen ? "on" : ""}" data-graph="1" title="Afficher/cacher le graphique"><ha-icon icon="mdi:sine-wave"></ha-icon></button>` : ""}</div>
       ${status}${tabsTop}${this._tab === "coefs" && c.show_coefficients ? coefsView : tides}
     </ha-card>`;
@@ -306,10 +338,10 @@ class MareesTideCard extends HTMLElement {
   _css() {
     return `
     * { box-sizing:border-box; }
-    ha-card.dark { --mt-text:#f4f6fb; --mt-muted:#a9afc0; --mt-bg:linear-gradient(160deg,#16243a 0%,#1b1e32 50%,#241a2a 100%); --mt-border:rgba(255,255,255,.14); --mt-shadow:0 .6em 2em rgba(0,0,0,.35);
-      --mt-glass:rgba(255,255,255,.07); --mt-glass-b:rgba(255,255,255,.13); --mt-acc:#4fb3ff; --mt-ok:#3ddc84; --mt-warn:#ffb86b; --mt-err:#ff5a5f; --mt-grid:rgba(255,255,255,.1); }
-    ha-card.light { --mt-text:#1c2030; --mt-muted:#5d6477; --mt-bg:linear-gradient(160deg,#eef5fc 0%,#eef1f8 55%,#f6f0f2 100%); --mt-border:rgba(20,24,40,.12); --mt-shadow:0 .4em 1.4em rgba(20,24,40,.12);
-      --mt-glass:rgba(255,255,255,.7); --mt-glass-b:rgba(20,24,40,.1); --mt-acc:#1a76d2; --mt-ok:#1a9d55; --mt-warn:#c77a14; --mt-err:#d32f35; --mt-grid:rgba(20,24,40,.12); }
+    ha-card.dark { --mt-text:#f4f6fb; --mt-muted:#a9afc0; --mt-bg:var(--g-bg-x,linear-gradient(160deg,#16243a 0%,#1b1e32 50%,#241a2a 100%)); --mt-border:rgba(255,255,255,.14); --mt-shadow:0 .6em 2em rgba(0,0,0,.35);
+      --mt-glass:rgba(255,255,255,.07); --mt-glass-b:rgba(255,255,255,.13); --mt-acc:var(--acc-ui-x,#4fb3ff); --mt-ok:#3ddc84; --mt-warn:#ffb86b; --mt-err:#ff5a5f; --mt-grid:rgba(255,255,255,.1); }
+    ha-card.light { --mt-text:#1c2030; --mt-muted:#5d6477; --mt-bg:var(--g-bg-x,linear-gradient(160deg,#eef5fc 0%,#eef1f8 55%,#f6f0f2 100%)); --mt-border:rgba(20,24,40,.12); --mt-shadow:0 .4em 1.4em rgba(20,24,40,.12);
+      --mt-glass:rgba(255,255,255,.7); --mt-glass-b:rgba(20,24,40,.1); --mt-acc:var(--acc-ui-x,#1a76d2); --mt-ok:#1a9d55; --mt-warn:#c77a14; --mt-err:#d32f35; --mt-grid:rgba(20,24,40,.12); }
     ha-card { container-type:inline-size; display:flex; flex-direction:column; gap:12px; padding:16px; color:var(--mt-text); border-radius:24px; border:1px solid var(--mt-border); background:var(--mt-bg); box-shadow:var(--mt-shadow); overflow:hidden; }
     ha-icon { --mdc-icon-size:1.25em; flex:none; }
     button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; -webkit-tap-highlight-color:transparent; }
@@ -349,13 +381,13 @@ class MareesTideCard extends HTMLElement {
 }
 
 /* ---------- Éditeur visuel ---------- */
-const LABELS = { device_id: "Port (appareil Marées France)", title: "Titre (facultatif)", theme: "Thème", card_type: "Type de carte", days: "Jours affichés (3 à 10)",
+const LABELS = { ...GV_LABELS, device_id: "Port (appareil Marées France)", title: "Titre (facultatif)", theme: "Thème", card_type: "Type de carte", days: "Jours affichés (3 à 10)",
   show_temperature: "Température de l'eau", show_min_depth: "Zone de faible profondeur", show_coefficients: "Onglet coefficients" };
 const SCHEMA = [
   { name: "device_id", required: true, selector: { device: { integration: "marees_france" } } },
   { name: "title", selector: { text: {} } },
   { type: "grid", name: "", schema: [
-    { name: "theme", selector: { select: { mode: "dropdown", options: [{ value: "auto", label: "Automatique" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" }] } } },
+    { name: "theme", selector: { select: { mode: "dropdown", options: [{ value: "auto", label: "Automatique" }, { value: "light", label: "Clair" }, { value: "dark", label: "Sombre" }] } } }, ...GV_FIELDS,
     { name: "card_type", selector: { select: { mode: "dropdown", options: [{ value: "full", label: "Complète" }, { value: "condensed", label: "Condensée" }] } } } ] },
   { name: "days", selector: { number: { min: 3, max: 10, mode: "box" } } },
   { type: "grid", name: "", schema: [{ name: "show_temperature", selector: { boolean: {} } }, { name: "show_min_depth", selector: { boolean: {} } }, { name: "show_coefficients", selector: { boolean: {} } }] },
@@ -376,3 +408,4 @@ customElements.define("marees-tide-card-editor", MareesTideCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "marees-tide-card", name: "Marées France — Tide Card (FR)", description: "Marées : prochaine marée, courbe de hauteur d'eau, marées du jour et calendrier des coefficients.", preview: false });
 console.info(`%c MAREES-TIDE-CARD %c v${CARD_VERSION} `, "color:#fff;background:#1a76d2;font-weight:700;border-radius:3px 0 0 3px;padding:2px 4px", "color:#1a76d2;background:#fff;font-weight:700;border-radius:0 3px 3px 0;padding:2px 4px");
+}
